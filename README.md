@@ -98,3 +98,48 @@ Advanced Arduino Nano-based Physical Rehabilitation System for knee/ankle therap
 **Button:**
 - Short press: Enter selected mode / toggle home / start cycles
 - Hold 1s: Toggle `emergencyStop` (stops all, LCD "EMERGENCY STOP! Hold to Reset")
+
+## Main Loop Flow
+
+```
+loop():
+  readEncoder()        # Update targets/speed based on mode
+  checkButton()        # Mode toggle / E-stop
+  if !emergencyStop:
+    if mode in [1,2]: Manual()      # Speed = motorSpeed
+    elif mode == 3:    Automatic()  # State machine + dynamic speed
+    updateLCD()         # Optimized, <100ms rate
+  updateServo()         # Mode-specific logic
+  stepper.run()         # Non-blocking motion
+```
+
+**Key Optimizations:**
+- `stepper.run()` called every loop for smooth motion
+- LCD conditional redraws (no flicker, low CPU)
+- 1ms encoder debounce for responsive UI
+
+## Build & Upload
+
+```bash
+# Install PlatformIO if needed, then:
+pio run -t upload    # Build + flash to Nano
+pio device monitor   # Serial monitor @115200
+```
+
+**Dependencies:** Auto-installed via `platformio.ini`
+
+## Calibration Guide
+
+1. **STEPS_PER_MM**: Full travel / 250mm steps (e.g., 400 for 1/8 microstep)
+2. **SERVO_FWD/REV**: PWM for gentle rotation; time `MS_PER_DEGREE` @108/72 for 1°
+3. **MS_PER_DEGREE**: Measure physical 1° turn time → encoder ° accuracy
+4. **Angle Map**: Adjust if knee geometry ≠ linear 90-180°
+
+## Extensions & Safety
+
+- **Hardware:** Limit switches on stepper ends
+- **Software:** EEPROM save/restore speed/cycles/manualTarget
+- **Safety:** Current-limiting driver, soft-starts, E-stop tested
+- **UI:** Add buzzer feedback, OLED upgrade for graphs
+
+Documentation updated to match current `src/main.cpp` implementation.
