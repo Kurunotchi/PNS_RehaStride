@@ -142,4 +142,3 @@ pio device monitor   # Serial monitor @115200
 - **Safety:** Current-limiting driver, soft-starts, E-stop tested
 - **UI:** Add buzzer feedback, OLED upgrade for graphs
 
-Documentation updated to match current `src/main.cpp` implementation.
