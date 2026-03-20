@@ -1,89 +1,100 @@
 # Robotics_PNS Project Documentation
 
-## 1. Project Overview
+## Project Overview
 
-This is a robotics rehabilitation control project designed for an Arduino-based system. It integrates:
-- stepper motor control (`AccelStepper`)
-- LCD display (`LiquidCrystal_I2C`)
-- rotary encoder input
-- two servos for ankle push/relax movements
+Advanced Arduino Nano-based Physical Rehabilitation System for knee/ankle therapy.
 
-The system supports:
-- Manual mode (encoder controls position)
-- Automatic rehab mode (state machine cycles through extension, hold, push, return, relax, hold)
-- Emergency stop toggle (button hold >3s)
+**Key Features:**
+- 5-mode menu-driven interface (Home → Manual Leg / Manual Ankle / Set Cycles → Auto Rehab)
+- Precision stepper control for knee extension (0-250mm travel)
+- Continuous rotation servos for ankle push/relax (1° encoder precision)
+- Real-time knee angle display (90° seated → 180° extended)
+- Finite/Infinite auto cycles with dynamic speed control
+- 1-button control: short-press mode toggle, 1s hold emergency stop/reset
+- Optimized LCD updates, I2C 400kHz for smooth stepper motion
 
-## 2. Hardware Pinout
+**Libraries:** AccelStepper, LiquidCrystal_I2C, Servo
+**Board:** Arduino Nano ATMega328P
 
-| Function | Pin | Notes |
-|----------|-----|-------|
-| Stepper STEP | `3` | AccelStepper DRIVER mode |
-| Stepper DIR | `4` | |
-| Stepper ENABLE | `5` | Active low |
-| Rotary encoder CLK | `9` | `INPUT_PULLUP` |
-| Rotary encoder DT | `8` | `INPUT_PULLUP` |
-| Rotary encoder SW | `10` | pushbutton, `INPUT_PULLUP` |
-| Servo 1 signal | `7` | |
-| Servo 2 signal | `6` | |
+## Hardware Pinout
 
-## 3. Constants and Configuration
+| Function          | Pin | Notes                  |
+|-------------------|-----|------------------------|
+| Stepper STEP      | 3   | AccelStepper::DRIVER  |
+| Stepper DIR       | 4   |                        |
+| Stepper ENABLE    | 5   | LOW=enabled           |
+| Encoder CLK       | 9   | INPUT_PULLUP          |
+| Encoder DT        | 8   | INPUT_PULLUP          |
+| Encoder Button SW | 10  | INPUT_PULLUP, long-press E-stop |
+| Servo1 (Ankle)    | 7   | Continuous rotation   |
+| Servo2 (Ankle)    | 6   | Continuous rotation   |
 
-- `STEPS_PER_MM = 100` (microsteps per mm)
-- `MAX_TRAVEL_MM = 250`
-- `EXTEND_POSITION = 250`
-- `MIN_SPEED = 200`, `MAX_SPEED = 1500`, `DEFAULT_SPEED = 500`
-- `HOLD_TIME = 2000` ms
-- `LCD_REFRESH = 500` ms
-- `SERVO_STOP = 90`, `SERVO_PUSH = 110`, `SERVO_RELAX = 70`, `SERVO_TIME = 1000` ms
+**Notes:** Servos are continuous rotation type (speed/direction control, not position).
 
-## 4. Modes
+## Constants & Configuration
 
-### Manual Mode
-- Active when `mode == 0`
-- Rotary encoder adjusts `manualTarget` in steps of `5 mm` (`5 * STEPS_PER_MM`)
-- Stepper is moved to `manualTarget`
-- LCD shows "Manual Mode" and "Move Knob"
+| Constant          | Value    | Description                          |
+|-------------------|----------|--------------------------------------|
+| `STEPS_PER_MM`    | 400L     | Microsteps per mm (calibrate)        |
+| `MAX_TRAVEL_MM`   | 250L     | Max knee extension                   |
+| `EXTEND_POSITION` | 250L     | Full extension mm                    |
+| `MIN_SPEED`       | 200      | Min stepper steps/sec                |
+| `MAX_SPEED`       | 1500     | Max stepper steps/sec                |
+| `DEFAULT_SPEED`   | 500      | Initial speed                        |
+| `HOLD_TIME`       | 2000     | Hold duration (ms)                   |
+| `SERVO_STOP`      | 90       | Neutral/stop PWM                     |
+| `SERVO_FWD`       | 108      | Forward rotation (calibrate)         |
+| `SERVO_REV`       | 72       | Reverse rotation (calibrate)         |
+| `MS_PER_DEGREE`   | 40       | Time for 1° at FWD/REV speed (calib) |
 
-### Automatic Rehab Mode
-- Active when `mode == 1`
-- State machine in `RehabState`:
-  1. `MOVE_EXTEND` -> move to `EXTEND_POSITION`
-  2. `ANKLE_PUSH` -> run servos to `SERVO_PUSH`
-  3. `HOLD_EXTEND` -> wait `HOLD_TIME`
-  4. `MOVE_HOME` -> move to `0`
-  5. `ANKLE_RELAX` -> run servos to `SERVO_RELAX`
-  6. `HOLD_HOME` -> wait `HOLD_TIME`
-  7. loop back to `MOVE_EXTEND`
-- LCD shows "Auto Rehab" and current speed
+## Modes (0-4)
 
-## 5. Controls
+**Mode 0: Home Menu**
+- LCD: `>Leg  Ank  Auto` (encoder selects, button enters)
+- Encoder: Navigate menu (1:Manual Leg, 2:Manual Ankle, 3:Set Cycles)
 
-- Rotary encoder turned in manual mode adjusts target position.
-- Rotary encoder turned in automatic mode adjusts `motorSpeed`.
-- Encoder button press toggles between manual and automatic mode.
-- Encoder button hold >3 seconds toggles `emergencyStop`.
+**Mode 1: Manual Leg (Knee Extension)**
+- LCD: `Ctrl: Leg (Knee)` / `Set: XXXmm`
+- Encoder CW: +1mm (`+1*STEPS_PER_MM`), CCW: -5mm
+- Stepper moves to `manualTarget` (0-250mm)
 
-## 6. Setup Sequence
+**Mode 2: Manual Ankle**
+- LCD: `Ctrl: Ankle` / `Set: XXX°`
+- Encoder: ±1° (`targetServoAngle` 0-180°), servos FWD/REV until stop (50ms idle)
+- Continuous rotation control
 
-1. Set `ENABLE_PIN` low (releases stepper driver).
-2. Set encoder pins to `INPUT_PULLUP`.
-3. Initialize stepper max speed and acceleration.
-4. Initialize LCD and backlight.
-5. Attach servos and set to stop position.
-6. Display initial mode text.
+**Mode 4: Set Cycles**
+- LCD: `Set Auto Cycles:` / `> XX Cycles` or `> Infinite`
+- Encoder: Adjust `targetCycles` (0=∞, 1-99), button → Mode 3
 
-## 7. Main Loop
+**Mode 3: Automatic Rehab**
+- Cycles: `targetCycles` times or infinite
+- Dynamic speed via encoder (±50 steps/sec)
+- LCD: `Extend [1/10]` / `Spd:500 A:135°` + state
+- State machine:
 
-Every cycle:
-1. `readEncoder()` reads the rotary encoder and updates targets/speed.
-2. `checkButton()` handles mode toggle and emergency stop.
-3. If not emergency stopped:
-   - Run `Manual()` or `Automatic()` depending on mode.
-4. `updateServo()` returns servos to stop after `SERVO_TIME`.
-5. `stepper.run()` executes stepper motion.
+**Auto State Machine (`RehabState`):**
+1. `MOVE_EXTEND`: Stepper to 250mm
+2. `ANKLE_PUSH`: Servos FWD 500ms
+3. `HOLD_EXTEND`: Wait 2s
+4. `MOVE_HOME`: Stepper to 0mm
+5. `ANKLE_RELAX`: Servos REV 500ms
+6. `HOLD_HOME`: Wait 2s
+7. Next cycle or stop if finite
 
-## 8. Notes / Extensions
+**Knee Angle:** `map(currentPos, 0, 250*400, 90, 180)` °
 
-- Adjust `STEPS_PER_MM` and `EXTEND_POSITION` to match mechanical travel.
-- Add physical limit switches to prevent over-travel in manual mode.
-- Add persistent settings in EEPROM for speed and position.
+## Controls & UI
+
+**Encoder Behaviors (mode-specific):**
+| Mode | CW/RIGHT | CCW/LEFT |
+|------|----------|----------|
+| 0 Home | Next menu | Prev menu |
+| 1 Leg | +1mm | -5mm |
+| 2 Ankle | +1° FWD | -1° REV |
+| 3 Auto | +50 speed | -50 speed |
+| 4 Cycles | +1 cycle | -1 cycle |
+
+**Button:**
+- Short press: Enter selected mode / toggle home / start cycles
+- Hold 1s: Toggle `emergencyStop` (stops all, LCD "EMERGENCY STOP! Hold to Reset")
