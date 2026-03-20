@@ -1,55 +1,89 @@
-Features
+# Robotics_PNS Project Documentation
 
-Dual Operation Modes
+## 1. Project Overview
 
-Manual Mode – User-controlled positioning via rotary encoder
+This is a robotics rehabilitation control project designed for an Arduino-based system. It integrates:
+- stepper motor control (`AccelStepper`)
+- LCD display (`LiquidCrystal_I2C`)
+- rotary encoder input
+- two servos for ankle push/relax movements
 
-Automatic Rehab Mode – Pre-programmed extension and return cycles
+The system supports:
+- Manual mode (encoder controls position)
+- Automatic rehab mode (state machine cycles through extension, hold, push, return, relax, hold)
+- Emergency stop toggle (button hold >3s)
 
-Precision Motion Control
+## 2. Hardware Pinout
 
-Adjustable travel distance using stepper motor (mm-based movement)
+| Function | Pin | Notes |
+|----------|-----|-------|
+| Stepper STEP | `3` | AccelStepper DRIVER mode |
+| Stepper DIR | `4` | |
+| Stepper ENABLE | `5` | Active low |
+| Rotary encoder CLK | `9` | `INPUT_PULLUP` |
+| Rotary encoder DT | `8` | `INPUT_PULLUP` |
+| Rotary encoder SW | `10` | pushbutton, `INPUT_PULLUP` |
+| Servo 1 signal | `7` | |
+| Servo 2 signal | `6` | |
 
-Smooth acceleration and speed control
+## 3. Constants and Configuration
 
-Rehabilitation Cycle Logic
+- `STEPS_PER_MM = 100` (microsteps per mm)
+- `MAX_TRAVEL_MM = 250`
+- `EXTEND_POSITION = 250`
+- `MIN_SPEED = 200`, `MAX_SPEED = 1500`, `DEFAULT_SPEED = 500`
+- `HOLD_TIME = 2000` ms
+- `LCD_REFRESH = 500` ms
+- `SERVO_STOP = 90`, `SERVO_PUSH = 110`, `SERVO_RELAX = 70`, `SERVO_TIME = 1000` ms
 
-Extend → Hold → Return → Hold sequence
+## 4. Modes
 
-Configurable repetitions and pause intervals
+### Manual Mode
+- Active when `mode == 0`
+- Rotary encoder adjusts `manualTarget` in steps of `5 mm` (`5 * STEPS_PER_MM`)
+- Stepper is moved to `manualTarget`
+- LCD shows "Manual Mode" and "Move Knob"
 
-User Interface
+### Automatic Rehab Mode
+- Active when `mode == 1`
+- State machine in `RehabState`:
+  1. `MOVE_EXTEND` -> move to `EXTEND_POSITION`
+  2. `ANKLE_PUSH` -> run servos to `SERVO_PUSH`
+  3. `HOLD_EXTEND` -> wait `HOLD_TIME`
+  4. `MOVE_HOME` -> move to `0`
+  5. `ANKLE_RELAX` -> run servos to `SERVO_RELAX`
+  6. `HOLD_HOME` -> wait `HOLD_TIME`
+  7. loop back to `MOVE_EXTEND`
+- LCD shows "Auto Rehab" and current speed
 
-16x2 I2C LCD for real-time feedback
+## 5. Controls
 
-Rotary encoder for navigation and adjustments
+- Rotary encoder turned in manual mode adjusts target position.
+- Rotary encoder turned in automatic mode adjusts `motorSpeed`.
+- Encoder button press toggles between manual and automatic mode.
+- Encoder button hold >3 seconds toggles `emergencyStop`.
 
-Safety System
+## 6. Setup Sequence
 
-Emergency stop via long-press button
+1. Set `ENABLE_PIN` low (releases stepper driver).
+2. Set encoder pins to `INPUT_PULLUP`.
+3. Initialize stepper max speed and acceleration.
+4. Initialize LCD and backlight.
+5. Attach servos and set to stop position.
+6. Display initial mode text.
 
-Immediate motion halt and system reset capability
+## 7. Main Loop
 
-Components
+Every cycle:
+1. `readEncoder()` reads the rotary encoder and updates targets/speed.
+2. `checkButton()` handles mode toggle and emergency stop.
+3. If not emergency stopped:
+   - Run `Manual()` or `Automatic()` depending on mode.
+4. `updateServo()` returns servos to stop after `SERVO_TIME`.
+5. `stepper.run()` executes stepper motion.
 
-Component and	Description
+## 8. Notes / Extensions
 
-Arduino Board	Any Arduino-compatible microcontroller to run the firmware and control the stepper motor.
-
-Stepper Motor	Provides precise linear motion; typically paired with a driver like A4988 or DRV8825.
-
-Stepper Motor Driver	Controls current, direction, and speed of the stepper motor. 
-
-Examples: A4988, DRV8825.
-
-Rotary Encoder with Push Button	Used for manual positioning and mode selection; supports both rotation and button press detection.
-
-16x2 I2C LCD	Displays system status, current mode, speed, and repetition count.
-
-Linear Actuator / Lead Screw	Converts rotational motion of the stepper motor into linear motion for rehabilitation exercises.
-
-Power Supply	Provides sufficient voltage and current for the stepper motor and Arduino board.
-
-Wires & Connectors	For proper connections between motor, driver, sensors, and Arduino.
-
-Frame / Mounting Hardware	Mechanical structure to hold the motor, actuator, and sensors securely.
+- Adjust `STEPS_PER_MM` and `EXTEND_POSITION` to match mechanical travel.
+- Add physical limit switches to prevent over-travel in manual mode.
+- Add persistent settings in EEPROM for speed and position.
