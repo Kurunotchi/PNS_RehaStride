@@ -1,144 +1,183 @@
 # Robotics_PNS Project Documentation
 
-## Project Overview
-
 Advanced Arduino Nano-based Physical Rehabilitation System for knee/ankle therapy.
 
-**Key Features:**
-- 5-mode menu-driven interface (Home → Manual Leg / Manual Ankle / Set Cycles → Auto Rehab)
-- Precision stepper control for knee extension (0-250mm travel)
-- Continuous rotation servos for ankle push/relax (1° encoder precision)
-- Real-time knee angle display (90° seated → 180° extended)
-- Finite/Infinite auto cycles with dynamic speed control
-- 1-button control: short-press mode toggle, 1s hold emergency stop/reset
-- Optimized LCD updates, I2C 400kHz for smooth stepper motion
+## Key Features (from current `src/main.cpp`)
+- Menu-driven UI with internal modes: 0..5 (see **Modes** below)
+- Stepper-driven knee extension via AccelStepper
+- Continuous-rotation servos for ankle push/relax
+- Automatic rehab implemented as a finite state machine
+- 1-button UI: short-press enters/starts, long-press (1s) toggles emergency stop & reset
+- LCD updates are rate-limited and only redraw when values change
+- EEPROM calibration offsets for stepper + both servos
 
-**Libraries:** AccelStepper, LiquidCrystal_I2C, Servo
-**Board:** Arduino Nano ATMega328P
+## Libraries / Board
+- Libraries: `AccelStepper`, `LiquidCrystal_I2C`, `Servo`, `Wire`, `EEPROM`
+- Board/MCU: Arduino Nano ATmega328P (`platformio.ini`: `nanoatmega328`)
 
-## Hardware Pinout
+## Hardware Pinout (from `src/main.cpp`)
+| Function | Pin | Notes |
+|---|---:|---|
+| Stepper STEP | 3 | AccelStepper::DRIVER |
+| Stepper DIR | 4 | |
+| Stepper ENABLE | 5 | LOW = enabled (active low) |
+| Encoder CLK | 9 | INPUT_PULLUP |
+| Encoder DT | 8 | INPUT_PULLUP |
+| Encoder Button SW | 10 | INPUT_PULLUP; long-press (~1s) toggles emergency stop |
+| Servo1 (ankle) | 7 | continuous rotation; uses FWD/STOP/REV PWM values |
+| Servo2 (ankle) | 6 | continuous rotation; uses FWD/STOP/REV PWM values |
 
-| Function          | Pin | Notes                  |
-|-------------------|-----|------------------------|
-| Stepper STEP      | 3   | AccelStepper::DRIVER  |
-| Stepper DIR       | 4   |                        |
-| Stepper ENABLE    | 5   | LOW=enabled           |
-| Encoder CLK       | 9   | INPUT_PULLUP          |
-| Encoder DT        | 8   | INPUT_PULLUP          |
-| Encoder Button SW | 10  | INPUT_PULLUP, long-press E-stop |
-| Servo1 (Ankle)    | 7   | Continuous rotation   |
-| Servo2 (Ankle)    | 6   | Continuous rotation   |
+## Constants & Configuration (from `src/main.cpp`)
+| Constant | Value | Description |
+|---|---:|---|
+| `STEPS_PER_MM` | 400 | steps per mm (knee travel scaling) |
+| `MAX_TRAVEL_MM` | 105 | maximum knee extension mm (coded limits) |
+| `EXTEND_POSITION` | 105 | “full extension mm” (present constant; auto uses `TARGET_ANGLE` mapping) |
+| `MIN_SPEED` | 200 | minimum stepper max speed |
+| `MAX_SPEED` | 1500 | maximum stepper max speed |
+| `DEFAULT_SPEED` | 500 | initial stepper speed |
+| `HOLD_TIME` | 5000 | hold duration in auto states (ms) |
+| `SERVO_STOP` | 90 | neutral/stop PWM |
+| `SERVO_FWD` | 108 | forward rotation PWM |
+| `SERVO_REV` | 72 | reverse rotation PWM |
+| `SERVO_MOVE_TIME` | 2000 | servo actuation time per auto servo state (ms) |
+| `TARGET_ANGLE` | 100 | target knee angle used by auto mode (degrees) |
 
-**Notes:** Servos are continuous rotation type (speed/direction control, not position).
+## Knee Angle Computation / Display
+- Auto mode converts `TARGET_ANGLE` to stepper position via:
+  - `angleToPositionMM(angle)`:
+    - constrains angle to `[90, 105]`
+    - linearly maps into `[0 .. MAX_TRAVEL_MM]`
+- LCD angle is displayed as:
+  - `currentAngle = map(calibratedPos, 0, MAX_TRAVEL_MM, 90, 105)`
 
-## Constants & Configuration
+## Modes (as implemented)
+> Note: Code uses internal `mode` values: 0=Home, 1=Manual Leg, 2=Manual Ankle, 3=Auto Rehab, 4=Set Cycles, 5=Calibration.
 
-| Constant          | Value    | Description                          |
-|-------------------|----------|--------------------------------------|
-| `STEPS_PER_MM`    | 400L     | Microsteps per mm (calibrate)        |
-| `MAX_TRAVEL_MM`   | 250L     | Max knee extension                   |
-| `EXTEND_POSITION` | 250L     | Full extension mm                    |
-| `MIN_SPEED`       | 200      | Min stepper steps/sec                |
-| `MAX_SPEED`       | 1500     | Max stepper steps/sec                |
-| `DEFAULT_SPEED`   | 500      | Initial speed                        |
-| `HOLD_TIME`       | 2000     | Hold duration (ms)                   |
-| `SERVO_STOP`      | 90       | Neutral/stop PWM                     |
-| `SERVO_FWD`       | 108      | Forward rotation (calibrate)         |
-| `SERVO_REV`       | 72       | Reverse rotation (calibrate)         |
-| `MS_PER_DEGREE`   | 40       | Time for 1° at FWD/REV speed (calib) |
+### Mode 0: Home Menu (mode==0)
+- LCD shows menu selection (Leg / Ank / Auto / Cal).
+- Encoder rotates through menu options `menuSelection` in range 1..4.
+- Short press enters:
+  - selection 1 → Mode 1 (Manual Leg)
+  - selection 2 → Mode 2 (Manual Ankle)
+  - selection 3 → Mode 4 (Set Cycles)
+  - selection 4 → Mode 5 (Calibration)
 
-## Modes (0-4)
+### Mode 1: Manual Leg (mode==1)
+- LCD:
+  - Top: `Ctrl: Leg (Knee)`
+  - Bottom: `Set: XXXmm`
+- Encoder:
+  - CW: `manualTarget += STEPS_PER_MM`
+  - CCW: `manualTarget -= STEPS_PER_MM`
+- Stepper continuously moves toward target (non-blocking) using `stepper.run()`.
 
-**Mode 0: Home Menu**
-- LCD: `>Leg  Ank  Auto` (encoder selects, button enters)
-- Encoder: Navigate menu (1:Manual Leg, 2:Manual Ankle, 3:Set Cycles)
+### Mode 2: Manual Ankle (mode==2)
+- LCD:
+  - Top: `Ctrl: Ankle`
+  - Bottom: `Set: XXX°` (prints `targetServoAngle`)
+- Encoder:
+  - CW: `targetServoAngle += 1` and commands both servos to `SERVO_FWD`
+  - CCW: `targetServoAngle -= 1` and commands both servos to `SERVO_REV`
+- `updateServo()` applies time-limited motion; after ~50ms idle it returns servos to `SERVO_STOP`.
 
-**Mode 1: Manual Leg (Knee Extension)**
-- LCD: `Ctrl: Leg (Knee)` / `Set: XXXmm`
-- Encoder CW: +1mm (`+1*STEPS_PER_MM`), CCW: -5mm
-- Stepper moves to `manualTarget` (0-250mm)
+### Mode 4: Set Cycles (mode==4)
+- LCD:
+  - Top: `Set Auto Cycles:`
+  - Bottom:
+    - `> Infinite` if `targetCycles == 0`
+    - otherwise `> NN Cycles`
+- Encoder:
+  - CW increments `targetCycles` (0..99)
+  - CCW decrements `targetCycles` (does not go below 0)
+- Short press starts Auto (switches to `mode=3`):
+  - sets `currentCycle = 0`
+  - sets `state = MOVE_EXTEND`
 
-**Mode 2: Manual Ankle**
-- LCD: `Ctrl: Ankle` / `Set: XXX°`
-- Encoder: ±1° (`targetServoAngle` 0-180°), servos FWD/REV until stop (50ms idle)
-- Continuous rotation control
+### Mode 3: Automatic Rehab (mode==3)
+- LCD top line: state name + cycle progress
+  - if infinite (`targetCycles==0`): shows `[INF]`
+  - else shows `[current/target]`
+- LCD bottom line (dynamic): `Spd:<motorSpeed> A:<currentAngle>°`
+- Encoder during auto:
+  - CW: `motorSpeed += 50`
+  - CCW: `motorSpeed -= 50`
 
-**Mode 4: Set Cycles**
-- LCD: `Set Auto Cycles:` / `> XX Cycles` or `> Infinite`
-- Encoder: Adjust `targetCycles` (0=∞, 1-99), button → Mode 3
+#### Auto State Machine (`RehabState`)
+- `MOVE_EXTEND`
+  - stepper moves to position derived from `TARGET_ANGLE`
+  - once `distanceToGo()==0` ⇒ move to `ANKLE_PUSH`
+- `ANKLE_PUSH`
+  - both servos: `SERVO_FWD` for `SERVO_MOVE_TIME`
+  - then ⇒ `HOLD_EXTEND`
+- `HOLD_EXTEND`
+  - waits `HOLD_TIME`
+  - then ⇒ `MOVE_HOME`
+- `MOVE_HOME`
+  - stepper moves to `0`
+  - once complete ⇒ set servos to `SERVO_REV` and go to `ANKLE_RELAX`
+- `ANKLE_RELAX`
+  - both servos: `SERVO_REV` for `SERVO_MOVE_TIME`
+  - then ⇒ `HOLD_HOME`
+- `HOLD_HOME`
+  - waits `HOLD_TIME`
+  - then increments `currentCycle`
+  - if finite and completed ⇒ returns to `mode=0` and stops
+  - else ⇒ loops back to `MOVE_EXTEND`
 
-**Mode 3: Automatic Rehab**
-- Cycles: `targetCycles` times or infinite
-- Dynamic speed via encoder (±50 steps/sec)
-- LCD: `Extend [1/10]` / `Spd:500 A:135°` + state
-- State machine:
+### Mode 5: Calibration (mode==5)
+Calibration is a sub-mode controlled by `calibrationSubMode`.
+- `CALIB_STEPPER`
+  - encoder moves `calibrationTempTarget` by `STEPS_PER_MM`
+  - stepper moves to that target while you adjust
+- Short press advances calibration:
+  - CALIB_STEPPER → CALIB_SERVO1
+  - CALIB_SERVO1 → CALIB_SERVO2
+  - CALIB_SERVO2 → save offsets and return to Mode 0
+- Servo calibration:
+  - In CALIB_SERVO1, encoder adjusts `calibrationServoAngle` while Servo1 runs and Servo2 stops
+  - In CALIB_SERVO2, encoder adjusts `calibrationServoAngle` while Servo2 runs and Servo1 stops
 
-**Auto State Machine (`RehabState`):**
-1. `MOVE_EXTEND`: Stepper to 250mm
-2. `ANKLE_PUSH`: Servos FWD 500ms
-3. `HOLD_EXTEND`: Wait 2s
-4. `MOVE_HOME`: Stepper to 0mm
-5. `ANKLE_RELAX`: Servos REV 500ms
-6. `HOLD_HOME`: Wait 2s
-7. Next cycle or stop if finite
+#### EEPROM fields
+- `EEPROM_STEPPER_OFFSET = 0`
+- `EEPROM_SERVO1_OFFSET = 4`
+- `EEPROM_SERVO2_OFFSET = 8`
+- `EEPROM_MAGIC_NUMBER = 12` (`MAGIC_NUM = 0xABCD`)
 
-**Knee Angle:** `map(currentPos, 0, 250*400, 90, 180)` °
+## Controls & UI Behavior
+### Encoder behavior (mode-specific)
+- Mode 0: scrolls menu (`menuSelection`)
+- Mode 1: knee mm (`manualTarget +=/- STEPS_PER_MM`)
+- Mode 2: ankle angle (`targetServoAngle +=/- 1`) and drives both servos FWD/REV
+- Mode 3: auto speed (`motorSpeed +=/- 50`)
+- Mode 4: cycle count (`targetCycles +=/- 1`)
+- Mode 5: calibration sub-target adjustment (stepper or servo angle depending on `calibrationSubMode`)
 
-## Controls & UI
+### Button behavior
+- Short press (logic depends on current mode/state; see code `checkButton()`):
+  - from Home selects mode
+  - from Set Cycles starts Auto
+  - from Calibration steps through servo calibration and saves to EEPROM
+- Long press (>1000ms): toggles `emergencyStop`
+  - when enabled: stepper is commanded to stop at current position and both servos go to `SERVO_STOP`
+  - when disabled: performs reset transitions depending on current mode
 
-**Encoder Behaviors (mode-specific):**
-| Mode | CW/RIGHT | CCW/LEFT |
-|------|----------|----------|
-| 0 Home | Next menu | Prev menu |
-| 1 Leg | +1mm | -5mm |
-| 2 Ankle | +1° FWD | -1° REV |
-| 3 Auto | +50 speed | -50 speed |
-| 4 Cycles | +1 cycle | -1 cycle |
+## Main Loop Flow (from `loop()`)
+1. `readEncoder()`
+2. `checkButton()`
+3. If not `emergencyStop`:
+   - `Manual()` if mode==1 or mode==2
+   - `Automatic()` if mode==3
+   - `updateLCD()`
+4. `updateServo()`
+5. `stepper.run()`
 
-**Button:**
-- Short press: Enter selected mode / toggle home / start cycles
-- Hold 1s: Toggle `emergencyStop` (stops all, LCD "EMERGENCY STOP! Hold to Reset")
-
-## Main Loop Flow
-
-```
-loop():
-  readEncoder()        # Update targets/speed based on mode
-  checkButton()        # Mode toggle / E-stop
-  if !emergencyStop:
-    if mode in [1,2]: Manual()      # Speed = motorSpeed
-    elif mode == 3:    Automatic()  # State machine + dynamic speed
-    updateLCD()         # Optimized, <100ms rate
-  updateServo()         # Mode-specific logic
-  stepper.run()         # Non-blocking motion
-```
-
-**Key Optimizations:**
-- `stepper.run()` called every loop for smooth motion
-- LCD conditional redraws (no flicker, low CPU)
-- 1ms encoder debounce for responsive UI
-
-## Build & Upload
-
+## Build & Upload (PlatformIO)
 ```bash
-# Install PlatformIO if needed, then:
-pio run -t upload    # Build + flash to Nano
-pio device monitor   # Serial monitor @115200
+pio run -t upload
+pio device monitor
 ```
 
-**Dependencies:** Auto-installed via `platformio.ini`
-
-## Calibration Guide
-
-1. **STEPS_PER_MM**: Full travel / 250mm steps (e.g., 400 for 1/8 microstep)
-2. **SERVO_FWD/REV**: PWM for gentle rotation; time `MS_PER_DEGREE` @108/72 for 1°
-3. **MS_PER_DEGREE**: Measure physical 1° turn time → encoder ° accuracy
-4. **Angle Map**: Adjust if knee geometry ≠ linear 90-180°
-
-## Extensions & Safety
-
-- **Hardware:** Limit switches on stepper ends
-- **Software:** EEPROM save/restore speed/cycles/manualTarget
-- **Safety:** Current-limiting driver, soft-starts, E-stop tested
-- **UI:** Add buzzer feedback, OLED upgrade for graphs
+## Versioning / Doc Note
+This `documentation.md` was regenerated to match the current `src/main.cpp` implementation (travel limits, constants, LCD strings, and the auto state machine).
 
